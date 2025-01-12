@@ -79,7 +79,7 @@ async fn live(room_id: u64) -> Result<(), Box<dyn std::error::Error>> {
     let rtmp_addr = start_live_reply.data.rtmp.addr;
     let rtmp_code = start_live_reply.data.rtmp.code;
 
-    info!("rtmp address: {}{}", rtmp_addr, rtmp_code);
+    info!("rtmp address: {}", rtmp_addr);
     info!("rtmp code: {}", rtmp_code);
 
     let (shutdown_tx, mut _shutdown_rx) = tokio::sync::mpsc::channel(1);
