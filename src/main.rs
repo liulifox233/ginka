@@ -1,5 +1,4 @@
 mod model;
-mod notice;
 mod ws_protocol;
 
 use crate::ws_protocol::Operation::{Known, Unknown};
@@ -196,13 +195,12 @@ async fn watch(room_id: u64) -> Result<(), Box<dyn std::error::Error>> {
                     match pocket.operation {
                         Known(crate::ws_protocol::magic::KnownOperation::SendMsgReply)
                         | Known(crate::ws_protocol::magic::KnownOperation::SendMsg) => {
-                            let deserialized: serde_json::Value =
+                            let body: serde_json::Value =
                                 serde_json::from_str(&pocket.body).unwrap();
-                            match deserialized["cmd"].to_string().as_str() {
+                            match body["cmd"].to_string().as_str() {
                                 "\"DANMU_MSG\"" => {
                                     let info: serde_json::Value =
-                                        serde_json::from_str(&deserialized["info"].to_string())
-                                            .unwrap();
+                                        serde_json::from_str(&body["info"].to_string()).unwrap();
 
                                     let comment_text = info[1].as_str().unwrap_or("");
                                     let _user_id = info[2][0].as_i64().unwrap_or(0);
@@ -233,8 +231,7 @@ async fn watch(room_id: u64) -> Result<(), Box<dyn std::error::Error>> {
                                 }
                                 "\"INTERACT_WORD\"" => {
                                     let data: serde_json::Value =
-                                        serde_json::from_str(&deserialized["data"].to_string())
-                                            .unwrap();
+                                        serde_json::from_str(&body["data"].to_string()).unwrap();
                                     match data["msg_type"].as_i64() {
                                         Some(1) => {
                                             let uname = data["uname"].as_str().unwrap();
@@ -252,7 +249,7 @@ async fn watch(room_id: u64) -> Result<(), Box<dyn std::error::Error>> {
                                     }
                                 }
                                 c => {
-                                    debug!("other cmd: {c} => {deserialized:?}");
+                                    debug!("other cmd: {c} => {body:?}");
                                 }
                             }
                         }
