@@ -2,12 +2,11 @@ mod model;
 mod notice;
 mod ws_protocol;
 
-use std::process::exit;
-
 use crate::ws_protocol::Operation::{Known, Unknown};
 use clap::Parser;
 use futures_util::{SinkExt, StreamExt};
-use serde_json::Number;
+use mac_notification_sys::{get_bundle_identifier_or_default, send_notification, set_application};
+use std::process::Command;
 use std::sync::OnceLock;
 
 use tokio_tungstenite::connect_async;
@@ -36,6 +35,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .set(std::env::var("COOKIE").expect("COOKIE must be set"))
         .unwrap();
 
+    let bundle = get_bundle_identifier_or_default("finder");
+    set_application(&bundle).unwrap();
+
     let arg = Arg::parse();
 
     let room_id = arg.room_id;
@@ -50,7 +52,7 @@ async fn live(room_id: u64) -> Result<(), Box<dyn std::error::Error>> {
     let cookie = COOKIE.get().unwrap();
     let start_live_reply = reqwest::Client::new()
         .post("https://api.live.bilibili.com/room/v1/Room/startLive")
-        .header("Cookie", format!("{cookie}"))
+        .header("Cookie", cookie.to_string())
         .header("Content-Type", "application/x-www-form-urlencoded")
         .body(format!(
             "room_id={}&area_v2={}&platform={}&csrf={}",
@@ -80,7 +82,9 @@ async fn live(room_id: u64) -> Result<(), Box<dyn std::error::Error>> {
     info!("rtmp address: {}{}", rtmp_addr, rtmp_code);
     info!("rtmp code: {}", rtmp_code);
 
-    let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::channel(1);
+    let (shutdown_tx, mut _shutdown_rx) = tokio::sync::mpsc::channel(1);
+
+    info!("Application started");
 
     tokio::signal::ctrl_c()
         .await
@@ -92,7 +96,7 @@ async fn live(room_id: u64) -> Result<(), Box<dyn std::error::Error>> {
     info!("Received Ctrl+C, shutting down...");
     let res = reqwest::Client::new()
         .post("https://api.live.bilibili.com/room/v1/Room/stopLive")
-        .header("Cookie", format!("{cookie}"))
+        .header("Cookie", cookie.to_string())
         .header("Content-Type", "application/x-www-form-urlencoded")
         .body(format!(
             "room_id={}&csrf={}",
@@ -137,7 +141,7 @@ async fn watch(room_id: u64) -> Result<(), Box<dyn std::error::Error>> {
 
     let room_info = reqwest::Client::new()
         .get(connect_addr)
-        .header("Cookie", format!("{cookie}"))
+        .header("Cookie", cookie.to_string())
         .send()
         .await?
         .json::<model::RoomDanmuInfo>()
@@ -172,7 +176,7 @@ async fn watch(room_id: u64) -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(async move {
         let mut ws_write = ws_write;
         loop {
-            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+            tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
             ws_write
                 .send(tokio_tungstenite::tungstenite::Message::from(
                     ws_protocol::Packet::heartbeat(),
@@ -181,6 +185,8 @@ async fn watch(room_id: u64) -> Result<(), Box<dyn std::error::Error>> {
                 .unwrap();
         }
     });
+
+    info!("Application started");
 
     while let Some(msg) = ws_read.next().await {
         match msg {
@@ -199,15 +205,31 @@ async fn watch(room_id: u64) -> Result<(), Box<dyn std::error::Error>> {
                                             .unwrap();
 
                                     let comment_text = info[1].as_str().unwrap_or("");
-                                    let user_id = info[2][0].as_i64().unwrap_or(0);
+                                    let _user_id = info[2][0].as_i64().unwrap_or(0);
                                     let user_name = info[2][1].as_str().unwrap_or("");
-                                    let is_admin = info[2][2].as_i64().unwrap_or(0) == 1;
-                                    let is_vip = info[2][3].as_i64().unwrap_or(0) == 1;
-                                    let user_guard_level = info[7].as_i64().unwrap_or(0);
+                                    let _is_admin = info[2][2].as_i64().unwrap_or(0) == 1;
+                                    let _is_vip = info[2][3].as_i64().unwrap_or(0) == 1;
+                                    let _user_guard_level = info[7].as_i64().unwrap_or(0);
+                                    debug!("{:?}", info[0][15]);
+                                    let avatar =
+                                        info[0][15]["user"]["base"]["face"].as_str().unwrap();
+
+                                    debug!(avatar);
 
                                     let message =
                                         format!("User: {}, Comment: {}", user_name, comment_text);
                                     info!("{message}");
+                                    Command::new("terminal-notifier")
+                                        .args([
+                                            "-title",
+                                            user_name,
+                                            "-message",
+                                            comment_text,
+                                            "-contentImage",
+                                            avatar,
+                                        ])
+                                        .output()
+                                        .expect("Failed to execute command");
                                 }
                                 "\"INTERACT_WORD\"" => {
                                     let data: serde_json::Value =
@@ -216,17 +238,21 @@ async fn watch(room_id: u64) -> Result<(), Box<dyn std::error::Error>> {
                                     match data["msg_type"].as_i64() {
                                         Some(1) => {
                                             let uname = data["uname"].as_str().unwrap();
-                                            info!("{uname} 进入直播间")
+                                            info!("{uname} 进入直播间");
+                                            send_notification(uname, None, "进入直播间", None)
+                                                .unwrap();
                                         }
                                         Some(2) => {
                                             let uname = data["uname"].as_str().unwrap();
-                                            info!("{uname} 关注了主播")
+                                            info!("{uname} 关注了主播");
+                                            send_notification(uname, None, "关注了主播", None)
+                                                .unwrap();
                                         }
                                         _ => {}
                                     }
                                 }
                                 c => {
-                                    info!("other cmd: {c} => {deserialized:?}");
+                                    debug!("other cmd: {c} => {deserialized:?}");
                                 }
                             }
                         }

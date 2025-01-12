@@ -1,4 +1,3 @@
-use brotli::enc::static_dict;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
